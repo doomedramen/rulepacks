@@ -1,6 +1,6 @@
 {
   "name": "rulepacks",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Git-native package manager for AI coding-agent instructions",
   "type": "module",
   "bin": {

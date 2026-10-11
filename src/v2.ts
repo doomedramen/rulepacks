@@ -204,9 +204,16 @@ async function readBytes(path: string): Promise<Buffer | undefined> {
   }
 }
 
-async function managedExpectedHash(path: string, previous: string | undefined): Promise<string | null | undefined> {
+function handEditedMessage(logical: string): string {
+  return `Generated file drift detected: ${logical} was edited by hand; move the edits into a local file such as .agents/project.md, then restore or delete ${logical} and run rulepacks render`;
+}
+
+async function managedExpectedHash(logical: string, path: string, previous: string | undefined): Promise<string | null | undefined> {
   if (previous === undefined) return undefined;
-  return (await fileHash(path)) === null ? null : previous;
+  const actual = await fileHash(path);
+  if (actual === null) return null;
+  if (actual !== previous) throw new Error(handEditedMessage(logical));
+  return previous;
 }
 
 async function readConfig(paths: ScopePaths, global: boolean): Promise<ConsumerConfigV2> {
@@ -1024,7 +1031,7 @@ export async function checkV2(options: V2CommandOptions): Promise<void> {
     const destination = logicalDestination(options, logical);
     await assertNoSymlinkPath(destination, options.global ? userHome() : options.projectRoot);
     const actual = await fileHash(destination);
-    if (actual !== sha256(generated.contents)) throw checkFailure(`Generated file drift detected: ${logical}; run rulepacks render`);
+    if (actual !== sha256(generated.contents)) throw checkFailure(handEditedMessage(logical));
   }
   if (JSON.stringify(lock.outputs) !== JSON.stringify(rendered.outputLocks)) {
     throw checkFailure("Output ownership differs from lock; run rulepacks render");
@@ -1502,12 +1509,12 @@ async function writeRenderedState(
   for (const [logical, generated] of rendered.generated) {
     const destination = logicalDestination(options, logical);
     plannedPaths.add(destination);
-    writes.push({ path: destination, contents: generated.contents, expectedSha256: await managedExpectedHash(destination, oldLock.generatedFiles[logical]?.sha256) });
+    writes.push({ path: destination, contents: generated.contents, expectedSha256: await managedExpectedHash(logical, destination, oldLock.generatedFiles[logical]?.sha256) });
   }
   for (const logical of Object.keys(oldLock.generatedFiles)) {
     if (rendered.generated.has(logical)) continue;
     const destination = logicalDestination(options, logical);
-    writes.push({ path: destination, contents: undefined, expectedSha256: await managedExpectedHash(destination, oldLock.generatedFiles[logical].sha256) });
+    writes.push({ path: destination, contents: undefined, expectedSha256: await managedExpectedHash(logical, destination, oldLock.generatedFiles[logical].sha256) });
   }
   const configBytes = Buffer.from(stringify(rendered.config), "utf8");
   const lockBytes = Buffer.from(stringify(nextLock), "utf8");
@@ -1543,7 +1550,7 @@ function persistPackOmissions(config: ConsumerConfigV2, lock: V2LockFile): void 
 async function checkExistingGenerated(oldLock: V2LockFile, options: V2CommandOptions): Promise<void> {
   for (const [logical, entry] of Object.entries(oldLock.generatedFiles)) {
     const actual = await fileHash(logicalDestination(options, logical));
-    if (actual !== entry.sha256) throw new Error(`Generated file drift detected: ${logical}; preserve edits in a local fragment`);
+    if (actual !== entry.sha256) throw new Error(handEditedMessage(logical));
   }
 }
 
